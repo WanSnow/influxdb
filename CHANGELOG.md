@@ -1,11 +1,50 @@
 ## unreleased
 
-### ARM Support
+### Docker
 
-This release includes our initial ARM64 "preview" build.
+#### ARM64
+This release extends the Docker builds hosted in `quay.io` to support the `linux/arm64` platform.
+
+#### 2.x nightly images
+Prior to this release, competing nightly builds caused the `nightly` Docker tag to contain outdated
+binaries. This conflict has been fixed, and the image tagged with `nightly` will now contain `2.x`
+binaries built from the `HEAD` of the `master` branch.
 
 ### Breaking Changes
 
+#### inmem index option removed
+This release fully removes the `inmem` indexing option, along with the associated config options:
+* `max-series-per-database`
+* `max-values-per-tag`
+
+Replacement `tsi1` indexes will be automatically generated on startup for shards that need it.
+
+### Bug Fixes
+
+1. [20339](https://github.com/influxdata/influxdb/pull/20339): Include upgrade helper script in goreleaser manifest.
+1. [20348](https://github.com/influxdata/influxdb/pull/20348): Don't show the upgrade notice on fresh `influxdb2` installs.
+1. [20348](https://github.com/influxdata/influxdb/pull/20348): Ensure `config.toml` is initialized on fresh `influxdb2` installs.
+1. [20349](https://github.com/influxdata/influxdb/pull/20349): Ensure `influxdb` service sees default env variables when running under `init.d`.
+1. [20317](https://github.com/influxdata/influxdb/pull/20317): Don't ignore failures to set password during initial user onboarding.
+1. [20362](https://github.com/influxdata/influxdb/pull/20362): Don't overwrite stack name/description on `influx stack update`.
+1. [20355](https://github.com/influxdata/influxdb/pull/20355): Fix timeout setup for `influxd` graceful shutdown.
+1. [20387](https://github.com/influxdata/influxdb/pull/20387): Improve error message shown when `influx` CLI can't find an org by name.
+1. [20380](https://github.com/influxdata/influxdb/pull/20380): Remove duplication from task error messages.
+1. [20313](https://github.com/influxdata/influxdb/pull/20313): Automatically build `tsi1` indexes for shards that need it instead of falling back to `inmem`.
+1. [20313](https://github.com/influxdata/influxdb/pull/20313): Fix logging initialization for storage engine.
+1. [20442](https://github.com/influxdata/influxdb/pull/20442): Don't return 500 codes for partial write failures.
+1. [20440](https://github.com/influxdata/influxdb/pull/20440): Add confirmation step w/ file sizes before copying data files in `influxd upgrade`.
+1. [20409](https://github.com/influxdata/influxdb/pull/20409): Improve messages in DBRP API validation errors.
+
+## v2.0.3 [2020-12-14]
+
+### ARM Support
+
+This release includes our initial ARM64 preview build.
+
+### Breaking Changes
+
+#### influxd upgrade
 Previously, `influxd upgrade` would attempt to write upgraded `config.toml` files into the same directory as the source
 `influxdb.conf` file. If this failed, a warning would be logged and `config.toml` would be written into the `HOME` directory.
 
@@ -16,6 +55,11 @@ This release breaks this behavior in two ways:
 Users can use the new `--v2-config-path` option to override the output path for upgraded config if they can't or don't
 want to use the default.
 
+#### v2 packaging
+Based on community feedback, the v2 deb and rpm packaging has been improved to avoid confusion between versions.  The package
+name is now influxdb2 and conflicts with any previous influxdb package (including initial 2.0.0, 2.0.1, and 2.0.2 packages).
+Additionally, v2 specific path defaults are now defined and helper scripts are provided for `influxd upgrade` and cleanup cases.
+
 ### Features
 
 1. [20123](https://github.com/influxdata/influxdb/pull/20123): Allow password to be specified as a CLI option in `influx v1 auth create`.
@@ -23,6 +67,8 @@ want to use the default.
 1. [20110](https://github.com/influxdata/influxdb/pull/20110): Allow for users to specify where V2 config should be written in `influxd upgrade`.
 1. [20204](https://github.com/influxdata/influxdb/pull/20204): Improve ID-related error messages for `influx v1 dbrp` commands.
 1. [20236](https://github.com/influxdata/influxdb/pull/20236): Delete with predicate.
+1. [20322](https://github.com/influxdata/influxdb/pull/20322): Upgrade Flux to v0.99.0.
+1. [20327](https://github.com/influxdata/influxdb/pull/20327): Upgrade flux-lsp-browser to v0.5.26.
 
 ### Bug Fixes
 
@@ -36,6 +82,7 @@ want to use the default.
 1. [20201](https://github.com/influxdata/influxdb/pull/20201): Optimize shard lookup in groups containing only one shard. Thanks @StoneYunZhao!
 1. [20155](https://github.com/influxdata/influxdb/pull/20155): Respect the `--name` option in `influx setup` whether configs already exist or not.
 1. [20155](https://github.com/influxdata/influxdb/pull/20155): Allow for 0 (infinite) values for `--retention` in `influx setup`.
+1. [20305](https://github.com/influxdata/influxdb/pull/20305): Set v2 default paths and provide upgrade helper scripts in release packages
 
 ## v2.0.2 [2020-11-19]
 
@@ -117,7 +164,7 @@ want to use the default.
 1. [19819](https://github.com/influxdata/influxdb/pull/19819): Isolate telegraf config service and remove URM interactions
 1. [19853](https://github.com/influxdata/influxdb/pull/19853): Use updated HTTP client for authorization service
 1. [19856](https://github.com/influxdata/influxdb/pull/19856): Make tagKeys and tagValues work for edge cases involving fields
-1. [19870](https://github.com/influxdata/influxdb/pull/19870): Correctly parse float as 64-bits 
+1. [19870](https://github.com/influxdata/influxdb/pull/19870): Correctly parse float as 64-bits
 1. [19873](https://github.com/influxdata/influxdb/pull/19873): Add simple metrics related to installed templates
 1. [19885](https://github.com/influxdata/influxdb/pull/19885): Remove extra multiplication of retention policies in onboarding
 1. [19887](https://github.com/influxdata/influxdb/pull/19887): Use fluxinit package to init flux library instead of builtin

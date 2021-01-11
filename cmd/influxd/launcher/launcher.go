@@ -11,6 +11,7 @@ import (
 	_ "net/http/pprof" // needed to add pprof to our binary.
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,7 +41,6 @@ import (
 	"github.com/influxdata/influxdb/v2/kv/migration"
 	"github.com/influxdata/influxdb/v2/kv/migration/all"
 	"github.com/influxdata/influxdb/v2/label"
-	influxlogger "github.com/influxdata/influxdb/v2/logger"
 	"github.com/influxdata/influxdb/v2/nats"
 	endpointservice "github.com/influxdata/influxdb/v2/notification/endpoint/service"
 	ruleservice "github.com/influxdata/influxdb/v2/notification/rule/service"
@@ -122,9 +122,6 @@ type Launcher struct {
 	log                *zap.Logger
 	reg                *prom.Registry
 
-	Stdin      io.Reader
-	Stdout     io.Writer
-	Stderr     io.Writer
 	apibackend *http.APIBackend
 }
 
@@ -133,15 +130,11 @@ type stoppingScheduler interface {
 	Stop()
 }
 
-// NewLauncher returns a new instance of Launcher connected to standard in/out/err.
+// NewLauncher returns a new instance of Launcher with a no-op logger.
 func NewLauncher() *Launcher {
-	l := &Launcher{
-		Stdin:  os.Stdin,
-		Stdout: os.Stdout,
-		Stderr: os.Stderr,
+	return &Launcher{
+		log: zap.NewNop(),
 	}
-
-	return l
 }
 
 // Registry returns the prometheus metrics registry.
@@ -166,8 +159,13 @@ func (m *Launcher) Engine() Engine {
 }
 
 // Shutdown shuts down the HTTP server and waits for all services to clean up.
-func (m *Launcher) Shutdown(ctx context.Context) {
-	m.httpServer.Shutdown(ctx)
+func (m *Launcher) Shutdown(ctx context.Context) error {
+	var errs []string
+
+	if err := m.httpServer.Shutdown(ctx); err != nil {
+		m.log.Error("Failed to close HTTP server", zap.Error(err))
+		errs = append(errs, err.Error())
+	}
 
 	m.log.Info("Stopping", zap.String("service", "task"))
 
@@ -178,28 +176,42 @@ func (m *Launcher) Shutdown(ctx context.Context) {
 
 	m.log.Info("Stopping", zap.String("service", "bolt"))
 	if err := m.boltClient.Close(); err != nil {
-		m.log.Info("Failed closing bolt", zap.Error(err))
+		m.log.Error("Failed closing bolt", zap.Error(err))
+		errs = append(errs, err.Error())
 	}
 
 	m.log.Info("Stopping", zap.String("service", "query"))
 	if err := m.queryController.Shutdown(ctx); err != nil && err != context.Canceled {
-		m.log.Info("Failed closing query service", zap.Error(err))
+		m.log.Error("Failed closing query service", zap.Error(err))
+		errs = append(errs, err.Error())
 	}
 
 	m.log.Info("Stopping", zap.String("service", "storage-engine"))
 	if err := m.engine.Close(); err != nil {
 		m.log.Error("Failed to close engine", zap.Error(err))
+		errs = append(errs, err.Error())
 	}
 
 	m.wg.Wait()
 
 	if m.jaegerTracerCloser != nil {
 		if err := m.jaegerTracerCloser.Close(); err != nil {
-			m.log.Warn("Failed to closer Jaeger tracer", zap.Error(err))
+			m.log.Error("Failed to closer Jaeger tracer", zap.Error(err))
+			errs = append(errs, err.Error())
 		}
 	}
 
-	m.log.Sync()
+	// N.B. We ignore any errors here because Sync is known to fail with EINVAL
+	// when logging to Stdout on certain OS's.
+	//
+	// Uber made the same change within the core of the logger implementation.
+	// See: https://github.com/uber-go/zap/issues/328
+	_ = m.log.Sync()
+
+	if len(errs) > 0 {
+		return fmt.Errorf("failed to shut down server: [%s]", strings.Join(errs, ","))
+	}
+	return nil
 }
 
 // Cancel executes the context cancel on the program. Used for testing.
@@ -210,18 +222,6 @@ func (m *Launcher) run(ctx context.Context, opts *InfluxdOpts) (err error) {
 	defer span.Finish()
 
 	ctx, m.cancel = context.WithCancel(ctx)
-
-	if m.log == nil {
-		// Create top level logger
-		logconf := &influxlogger.Config{
-			Format: "auto",
-			Level:  opts.LogLevel,
-		}
-		m.log, err = logconf.New(m.Stdout)
-		if err != nil {
-			return err
-		}
-	}
 
 	info := platform.GetBuildInfo()
 	m.log.Info("Welcome to InfluxDB",
@@ -653,15 +653,16 @@ func (m *Launcher) run(ctx context.Context, opts *InfluxdOpts) (err error) {
 	ts.BucketService = storage.NewBucketService(m.log, ts.BucketService, m.engine)
 	ts.BucketService = dbrp.NewBucketService(m.log, ts.BucketService, dbrpSvc)
 
-	var onboardOpts []tenant.OnboardServiceOptionFn
+	onboardingLogger := m.log.With(zap.String("handler", "onboard"))
+	onboardOpts := []tenant.OnboardServiceOptionFn{tenant.WithOnboardingLogger(onboardingLogger)}
 	if opts.TestingAlwaysAllowSetup {
 		onboardOpts = append(onboardOpts, tenant.WithAlwaysAllowInitialUser())
 	}
 
-	onboardSvc := tenant.NewOnboardService(ts, authSvc, onboardOpts...)                               // basic service
-	onboardSvc = tenant.NewAuthedOnboardSvc(onboardSvc)                                               // with auth
-	onboardSvc = tenant.NewOnboardingMetrics(m.reg, onboardSvc, metric.WithSuffix("new"))             // with metrics
-	onboardSvc = tenant.NewOnboardingLogger(m.log.With(zap.String("handler", "onboard")), onboardSvc) // with logging
+	onboardSvc := tenant.NewOnboardService(ts, authSvc, onboardOpts...)                   // basic service
+	onboardSvc = tenant.NewAuthedOnboardSvc(onboardSvc)                                   // with auth
+	onboardSvc = tenant.NewOnboardingMetrics(m.reg, onboardSvc, metric.WithSuffix("new")) // with metrics
+	onboardSvc = tenant.NewOnboardingLogger(onboardingLogger, onboardSvc)                 // with logging
 
 	var (
 		authorizerV1 platform.AuthorizerV1

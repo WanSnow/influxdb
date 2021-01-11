@@ -13,8 +13,9 @@
 
 # SUBDIRS are directories that have their own Makefile.
 # It is required that all SUBDIRS have the `all` and `clean` targets.
-SUBDIRS := http ui chronograf query storage
+SUBDIRS := http ui chronograf storage
 
+export GOPATH=$(shell go env GOPATH)
 export GOOS=$(shell go env GOOS)
 export GOARCH=$(shell go env GOARCH)
 
@@ -44,13 +45,17 @@ ifdef VERSION
 	LDFLAGS += -X main.version=$(VERSION)
 endif
 
+# Allow for `go test` to be swapped out by other tooling, i.e. `gotestsum`
+GO_TEST_CMD=go test
+# Allow for a subset of tests to be specified.
+GO_TEST_PATHS=./...
 
 # Test vars can be used by all recursive Makefiles
 export PKG_CONFIG:=$(PWD)/scripts/pkg-config.sh
 export GO_BUILD=env GO111MODULE=on go build $(GO_BUILD_ARGS) -ldflags "$(LDFLAGS)"
 export GO_BUILD_SM=env GO111MODULE=on go build $(GO_BUILD_ARGS) -ldflags "-s -w $(LDFLAGS)"
 export GO_INSTALL=env GO111MODULE=on go install $(GO_BUILD_ARGS) -ldflags "$(LDFLAGS)"
-export GO_TEST=env GOTRACEBACK=all GO111MODULE=on go test $(GO_TEST_ARGS)
+export GO_TEST=env GOTRACEBACK=all GO111MODULE=on $(GO_TEST_CMD) $(GO_TEST_ARGS)
 # Do not add GO111MODULE=on to the call to go generate so it doesn't pollute the environment.
 export GO_GENERATE=go generate $(GO_BUILD_ARGS)
 export GO_VET=env GO111MODULE=on go vet $(GO_TEST_ARGS)
@@ -146,21 +151,23 @@ generate: $(SUBDIRS)
 test-js: node_modules
 	make -C ui test
 
-# Download tsdb testdata before running unit tests
 test-go:
-	$(GO_TEST) ./...
+	$(GO_TEST) $(GO_TEST_PATHS)
 
-test-promql-e2e:
-	cd query/promql/internal/promqltests; go test ./...
+test-influxql-integration:
+	$(GO_TEST) -mod=readonly ./influxql/_v1tests
+
+test-influxql-validation:
+	$(GO_TEST) -mod=readonly ./influxql/_v1validation
 
 test-integration: GO_TAGS=integration
 test-integration:
-	$(GO_TEST) -count=1 ./...
+	$(GO_TEST) -count=1 $(GO_TEST_PATHS)
 
 test: test-go test-js
 
 test-go-race:
-	$(GO_TEST) -v -race -count=1 ./...
+	$(GO_TEST) -v -race -count=1 $(GO_TEST_PATHS)
 
 vet:
 	$(GO_VET) -v ./...
@@ -209,13 +216,6 @@ run: chronogiraffe
 
 run-e2e: chronogiraffe
 	./bin/$(GOOS)/influxd --assets-path=ui/build --e2e-testing --store=memory
-
-# assume this is running from circleci
-# TODO: Move this to the CI docker image build?
-protoc:
-	curl -s -L https://github.com/protocolbuffers/protobuf/releases/download/v3.6.1/protoc-3.6.1-linux-x86_64.zip > /tmp/protoc.zip
-	unzip -o -d /go /tmp/protoc.zip
-	chmod +x /go/bin/protoc
 
 # generate feature flags
 flags:
