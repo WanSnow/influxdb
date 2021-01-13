@@ -36,6 +36,7 @@ Replacement `tsi1` indexes will be automatically generated on startup for shards
 1. [20455](https://github.com/influxdata/influxdb/pull/20455): Don't return 500 codes for partial write failures.
 1. [20471](https://github.com/influxdata/influxdb/pull/20471): Improve messages in DBRP API validation errors.
 1. [20472](https://github.com/influxdata/influxdb/pull/20472): Add confirmation step w/ file sizes before copying data files in `influxd upgrade`.
+1. [20490](https://github.com/influxdata/influxdb/pull/20490): Fix silent failure to register CLI args as required.
 
 ## v2.0.3 [2020-12-14]
 ----------------------
